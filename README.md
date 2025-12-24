@@ -61,14 +61,6 @@ Append `--verbose` to surface additional diagnostics.
 3. Keep `pyproject.toml` and `shrinkwrap/__init__.py` versions aligned.
 4. Format/ lint using your preferred tooling before opening a PR.
 
-### Releasing to PyPI
-
-1. Update the changelog/README, bump the version in `pyproject.toml` and `shrinkwrap/__init__.py`, and commit.
-2. Build artifacts: `python -m build`.
-3. Inspect `dist/` contents to ensure only intended files are packaged.
-4. Upload with `python -m twine upload dist/*` using a PyPI token.
-5. Tag the release (`git tag vX.Y.Z && git push --tags`) and draft a GitHub release.
-
 ## License
 
-MIT License. Add a `LICENSE` file to the repository before publishing publicly.
+MIT License
