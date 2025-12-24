@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "shrinkwrap"
+version = "0.1.0"
+description = "Bundle FastAPI applications into minimal runnable executables"
+readme = "README.md"
+requires-python = "=3.11"
+license = { text = "MIT" }
+
+authors = [
+    { name = "Pratyush Vishal", email = "pratyush.vishal15@gmail.com" }
+]
+
+dependencies = [
+    "typer>=0.9",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+shrinkwrap = "shrinkwrap.cli:run_cli"
+
+
+[tool.setuptools]
+packages = { find = {} }
+
+
+[tool.setuptools.package-data]
+shrinkwrap = ["py.typed"]
