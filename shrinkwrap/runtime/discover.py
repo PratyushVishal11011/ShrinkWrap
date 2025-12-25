@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -8,6 +9,7 @@ from shrinkwrap.runtime.python import PythonRuntime
 from shrinkwrap.errors import PythonRuntimeError
 
 SUPPORTED_MAJOR_MINOR = {"3.11"}
+
 
 def discover_python_runtime(
     *,
@@ -21,10 +23,11 @@ def discover_python_runtime(
     if major_minor not in SUPPORTED_MAJOR_MINOR:
         raise PythonRuntimeError(
             f"Unsupported Python version {info['version']} "
-            f"(supported: {', '.join(SUPPORTED_MAJOR_MINOR)})"
+            f"(supported: {', '.join(sorted(SUPPORTED_MAJOR_MINOR))})"
         )
 
     return PythonRuntime(
+        platform=info["platform"],
         python_executable=exe,
         version=info["version"],
         stdlib_path=Path(info["stdlib"]),
@@ -34,20 +37,41 @@ def discover_python_runtime(
         python_zip=Path(info["python_zip"])
         if info.get("python_zip")
         else None,
+        dlls_path=Path(info["dlls_dir"])
+        if info.get("dlls_dir")
+        else None,
     )
 
-def _resolve_python_executable(
-    explicit: Optional[Path],
-) -> Path:
+
+def _resolve_python_executable(explicit: Optional[Path]) -> Path:
     if explicit:
         exe = explicit
     else:
-        found = shutil.which("python3")
-        if not found:
-            raise PythonRuntimeError(
-                "No python3 executable found in PATH"
-            )
-        exe = Path(found)
+        exe: Optional[Path] = None
+        for candidate in ("python3", "python"):
+            found = shutil.which(candidate)
+            if found:
+                exe = Path(found)
+                break
+
+        if exe is None and os.name == "nt":
+            py_launcher = shutil.which("py")
+            if py_launcher:
+                try:
+                    result = subprocess.run(
+                        [py_launcher, "-3", "-c", "import sys; print(sys.executable)"],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    resolved = result.stdout.strip()
+                    if resolved:
+                        exe = Path(resolved)
+                except subprocess.CalledProcessError:
+                    exe = None
+
+        if exe is None:
+            raise PythonRuntimeError("No suitable python executable found in PATH")
 
     if not exe.exists():
         raise PythonRuntimeError(
@@ -58,45 +82,122 @@ def _resolve_python_executable(
 
 
 def _query_python_runtime(exe: Path) -> dict:
-
     probe_code = r"""
-import sys, sysconfig, json, pathlib
+import json, os, pathlib, sys, sysconfig
 
+platform = "windows" if os.name == "nt" else "posix"
 version = sys.version.split()[0]
 stdlib = sysconfig.get_path("stdlib")
 
-libpython = None
-ldlibrary = sysconfig.get_config_var("LDLIBRARY")
-libdir = sysconfig.get_config_var("LIBDIR")
+major = sys.version_info[0]
+minor = sys.version_info[1]
+digits = f"{major}{minor}"
 
-if ldlibrary and libdir:
-    candidate = pathlib.Path(libdir) / ldlibrary
-    if candidate.exists() and candidate.suffix in (".so", ".dylib"):
+stdlib_path = pathlib.Path(stdlib) if stdlib else None
+
+def dedupe(items):
+    seen = set()
+    out = []
+    for item in items:
+        if not item:
+            continue
+        path = pathlib.Path(item)
+        key = path.resolve()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(path)
+    return out
+
+lib_names = []
+ldlibrary = sysconfig.get_config_var("LDLIBRARY")
+if ldlibrary:
+    lib_names.append(ldlibrary)
+
+if platform == "windows":
+    lib_names.extend([
+        f"python{digits}.dll",
+        f"libpython{major}.{minor}.dll",
+    ])
+else:
+    lib_names.extend([
+        f"libpython{major}.{minor}.so",
+        f"libpython{major}.{minor}m.so",
+        f"libpython{major}.{minor}.dylib",
+    ])
+
+lib_dirs = []
+for key in ("LIBDIR", "BINDIR", "LIBPL", "LIBDEST"):
+    value = sysconfig.get_config_var(key)
+    if value:
+        lib_dirs.append(value)
+
+lib_dirs.extend([sys.prefix, sys.base_prefix, pathlib.Path(sys.executable).parent])
+
+if stdlib_path:
+    lib_dirs.append(stdlib_path.parent)
+    lib_dirs.append(stdlib_path.parent / "DLLs")
+
+libpython = None
+for directory in dedupe(lib_dirs):
+    for name in lib_names:
+        if not name:
+            continue
+        candidate = directory / name
+        suffix = candidate.suffix.lower()
+        if not candidate.exists() or not candidate.is_file():
+            continue
+        if suffix == ".a":
+            continue
+        if platform == "windows" and suffix != ".dll":
+            continue
+        if platform == "posix" and suffix not in (".so", ".dylib"):
+            continue
         libpython = str(candidate)
+        break
+    if libpython:
+        break
 
 python_zip = None
-if stdlib:
-    stdlib_path = pathlib.Path(stdlib)
-    zip_name = f"python{sys.version_info[0]}{sys.version_info[1]}.zip"
-    candidate_dirs = [
-        stdlib_path,
-        stdlib_path.parent,
-        stdlib_path.parent.parent,
-        pathlib.Path(sys.prefix),
-        pathlib.Path(sys.prefix) / "lib",
-    ]
+zip_name = f"python{digits}.zip"
+zip_dirs = [
+    stdlib_path,
+    stdlib_path.parent if stdlib_path else None,
+    stdlib_path.parent.parent if stdlib_path else None,
+    pathlib.Path(sys.prefix),
+    pathlib.Path(sys.base_prefix),
+    pathlib.Path(sys.prefix) / "lib",
+    pathlib.Path(sys.executable).parent,
+]
 
-    for directory in candidate_dirs:
-        candidate = directory / zip_name
-        if candidate.exists():
-            python_zip = str(candidate)
+for directory in dedupe(zip_dirs):
+    candidate = directory / zip_name
+    if candidate.exists() and candidate.is_file():
+        python_zip = str(candidate)
+        break
+
+dlls_dir = None
+if platform == "windows":
+    dll_dirs = [
+        pathlib.Path(sys.prefix) / "DLLs",
+        pathlib.Path(sys.base_prefix) / "DLLs",
+        pathlib.Path(sys.executable).parent / "DLLs",
+    ]
+    if stdlib_path:
+        dll_dirs.append(stdlib_path.parent / "DLLs")
+
+    for directory in dedupe(dll_dirs):
+        if directory.exists() and directory.is_dir():
+            dlls_dir = str(directory)
             break
 
 print(json.dumps({
     "version": version,
     "stdlib": stdlib,
+    "platform": platform,
     "libpython": libpython,
     "python_zip": python_zip,
+    "dlls_dir": dlls_dir,
 }))
 """
 

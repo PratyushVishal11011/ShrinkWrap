@@ -69,16 +69,17 @@ def _assemble_application(
                 f"Application source not found: {source}"
             )
 
-        target = layout.app_dir / source.name
-
         if source.is_dir():
             shutil.copytree(
                 source,
-                target,
+                layout.app_dir,
                 dirs_exist_ok=True,
             )
         else:
-            shutil.copy2(source, target)
+            shutil.copy2(
+                source,
+                layout.app_dir / source.name,
+            )
 
 
 def _assemble_dependencies(

@@ -16,8 +16,17 @@ def finalize_directory_bundle(
 
     _validate_layout(layout)
 
+    if layout.is_windows:
+        launcher_path = layout.root / f"{output_name}.bat"
+        _write_windows_launcher(
+            launcher_path=launcher_path,
+            layout=layout,
+            entrypoint=entrypoint,
+        )
+        return launcher_path
+
     launcher_path = layout.root / output_name
-    _write_launcher_script(
+    _write_posix_launcher(
         launcher_path=launcher_path,
         layout=layout,
         entrypoint=entrypoint,
@@ -43,7 +52,7 @@ def _validate_layout(layout: BundleLayout) -> None:
             )
 
 
-def _write_launcher_script(
+def _write_posix_launcher(
     launcher_path: Path,
     *,
     layout: BundleLayout,
@@ -74,6 +83,51 @@ export PYTHONPATH="{pythonpath}"
 export PYTHONNOUSERSITE=1
 
 exec "$ROOT/runtime/bin/python" -m uvicorn "{entrypoint}" --host 0.0.0.0 --port 8000
+"""
+
+    try:
+        launcher_path.write_text(script)
+    except OSError as exc:
+        raise BuildError(
+            f"Failed to write launcher script: {launcher_path}"
+        ) from exc
+
+
+def _write_windows_launcher(
+    launcher_path: Path,
+    *,
+    layout: BundleLayout,
+    entrypoint: str,
+) -> None:
+
+    stdlib_rel = layout.stdlib_dir.relative_to(layout.root)
+    lib_dynload_rel = (layout.stdlib_dir / "lib-dynload").relative_to(layout.root)
+    dlls_rel = layout.dlls_dir.relative_to(layout.root)
+
+    def _rel(path: Path) -> str:
+        return path.as_posix().replace("/", "\\")
+
+    pythonpath = ";".join(
+        [
+            r"%ROOT%\app",
+            r"%ROOT%\site-packages",
+            f"%ROOT%\\{_rel(stdlib_rel)}",
+            f"%ROOT%\\{_rel(lib_dynload_rel)}",
+            f"%ROOT%\\{_rel(dlls_rel)}",
+        ]
+    )
+
+    script = f"""@echo off
+setlocal
+set "ROOT=%~dp0"
+set "ROOT=%ROOT:~0,-1%"
+
+set "PYTHONHOME=%ROOT%\runtime"
+set "PYTHONPATH={pythonpath}"
+set "PYTHONNOUSERSITE=1"
+set "PATH=%ROOT%\runtime\DLLs;%ROOT%\runtime;%PATH%"
+
+"%ROOT%\runtime\python.exe" -m uvicorn "{entrypoint}" --host 0.0.0.0 --port 8000 %*
 """
 
     try:

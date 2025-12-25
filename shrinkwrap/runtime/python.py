@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -7,6 +7,11 @@ from shrinkwrap.errors import PythonRuntimeError
 
 
 class PythonRuntime(BaseModel):
+    platform: Literal["posix", "windows"] = Field(
+        ...,
+        description="Platform of the discovered interpreter",
+    )
+
     python_executable: Path = Field(
         ...,
         description="Path to the Python interpreter binary",
@@ -30,6 +35,11 @@ class PythonRuntime(BaseModel):
     python_zip: Optional[Path] = Field(
         default=None,
         description="Path to pythonXY.zip archive (if available)",
+    )
+
+    dlls_path: Optional[Path] = Field(
+        default=None,
+        description="Path to the DLLs directory (Windows only)",
     )
 
     @field_validator("python_executable")
@@ -94,6 +104,24 @@ class PythonRuntime(BaseModel):
             )
         return value
 
+    @field_validator("dlls_path")
+    @classmethod
+    def validate_dlls_path(
+        cls, value: Optional[Path]
+    ) -> Optional[Path]:
+        if value is None:
+            return value
+
+        if not value.exists():
+            raise PythonRuntimeError(
+                f"DLLs directory not found: {value}"
+            )
+        if not value.is_dir():
+            raise PythonRuntimeError(
+                f"DLLs path is not a directory: {value}"
+            )
+        return value
+
     @property
     def major_minor(self) -> str:
         parts = self.version.split(".")
@@ -102,6 +130,10 @@ class PythonRuntime(BaseModel):
     @property
     def is_embeddable(self) -> bool:
         return self.libpython_path is not None
+
+    @property
+    def is_windows(self) -> bool:
+        return self.platform == "windows"
 
     class Config:
         frozen = True

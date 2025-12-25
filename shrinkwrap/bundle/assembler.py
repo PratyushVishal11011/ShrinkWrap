@@ -21,9 +21,15 @@ def assemble_bundle(
         remove_dir(output_dir)
         ensure_dir(output_dir)
 
+        if runtime.is_windows:
+            stdlib_relative = Path("Lib")
+        else:
+            stdlib_relative = Path("lib") / f"python{runtime.major_minor}"
+
         layout = BundleLayout(
             output_dir,
-            stdlib_subdir=f"python{runtime.major_minor}",
+            stdlib_relative=stdlib_relative,
+            platform=runtime.platform,
         )
 
         for directory in layout.all_dirs():
@@ -51,6 +57,11 @@ def _assemble_runtime(
         layout.python_executable,
     )
 
+    if runtime.is_windows:
+        exe_dir = runtime.python_executable.parent
+        for dll in exe_dir.glob("vcruntime*.dll"):
+            shutil.copy2(dll, layout.runtime_dir / dll.name)
+
     ensure_dir(layout.stdlib_dir.parent)
     shutil.copytree(
         runtime.stdlib_path,
@@ -68,11 +79,19 @@ def _assemble_runtime(
             dirs_exist_ok=True,
         )
 
+    if runtime.dlls_path:
+        ensure_dir(layout.dlls_dir.parent)
+        shutil.copytree(
+            runtime.dlls_path,
+            layout.dlls_dir,
+            dirs_exist_ok=True,
+        )
+
     if runtime.python_zip:
-        ensure_dir(layout.runtime_dir / "lib")
+        ensure_dir(layout.python_zip_dir)
         shutil.copy2(
             runtime.python_zip,
-            layout.runtime_dir / "lib" / runtime.python_zip.name,
+            layout.python_zip_dir / runtime.python_zip.name,
         )
 
     if runtime.libpython_path:
@@ -104,8 +123,6 @@ def _assemble_application(
                 f"Application source not found: {source}"
             )
 
-        target = layout.app_dir / source.name
-
         if source.is_dir():
             ignore = None
             try:
@@ -116,12 +133,15 @@ def _assemble_application(
 
             shutil.copytree(
                 source,
-                target,
+                layout.app_dir,
                 dirs_exist_ok=True,
                 ignore=ignore,
             )
         else:
-            shutil.copy2(source, target)
+            shutil.copy2(
+                source,
+                layout.app_dir / source.name,
+            )
 
 
 def _assemble_dependencies(
