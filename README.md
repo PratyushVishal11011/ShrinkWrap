@@ -1,4 +1,4 @@
-# Shrinkwrap
+# Shrinkwrap (Beta)
 
 Shrinkwrap packages FastAPI (or any ASGI) applications into self-contained, redistributable directories that ship with a Python interpreter, your code, dependencies, and a launcher script. Bundle once, copy to any compatible host, and run without system Python.
 
