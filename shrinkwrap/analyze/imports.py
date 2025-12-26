@@ -12,6 +12,7 @@ class ImportGraph:
 
     def add_edge(self, source: str, target: str) -> None:
         self.add_module(source)
+        self.add_module(target)
         self.graph[source].add(target)
 
     def dependencies_of(self, module: str) -> Set[str]:
@@ -19,6 +20,13 @@ class ImportGraph:
 
     def all_modules(self) -> Set[str]:
         return set(self.graph.keys())
+
+    def all_imports(self) -> Set[str]:
+        imports: Set[str] = set()
+        for module, deps in self.graph.items():
+            imports.add(module)
+            imports.update(deps)
+        return imports
 
 def build_import_graph(
     entry_module: str,
@@ -63,7 +71,7 @@ def _walk_module(
     except SyntaxError:
         return
 
-    for imported in _extract_imports(tree):
+    for imported in _extract_imports(tree, module):
         graph.add_edge(module, imported)
 
         if _is_local_module(imported, project_root):
@@ -75,19 +83,44 @@ def _walk_module(
             )
 
 
-def _extract_imports(tree: ast.AST) -> Set[str]:
+def _extract_imports(tree: ast.AST, current_module: str) -> Set[str]:
     imports: Set[str] = set()
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                imports.add(alias.name.split(".")[0])
+                imports.add(alias.name)
 
         elif isinstance(node, ast.ImportFrom):
             if node.module:
-                imports.add(node.module.split(".")[0])
+                if node.level:
+                    resolved = _resolve_relative_import(current_module, node.level, node.module)
+                    if resolved:
+                        imports.add(resolved)
+                else:
+                    imports.add(node.module)
+            elif node.level:
+                for alias in node.names:
+                    resolved = _resolve_relative_import(current_module, node.level, alias.name)
+                    if resolved:
+                        imports.add(resolved)
 
     return imports
+
+
+def _resolve_relative_import(current_module: str, level: int, target: str | None) -> str | None:
+    parts = current_module.split(".")
+    if len(parts) < level:
+        return None
+
+    base = parts[: len(parts) - level]
+    if target:
+        base.append(target)
+
+    if not base:
+        return None
+
+    return ".".join(base)
 
 
 def _module_to_path(module: str, project_root: Path) -> Path | None:

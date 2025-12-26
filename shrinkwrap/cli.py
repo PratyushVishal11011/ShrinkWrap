@@ -16,6 +16,8 @@ from shrinkwrap.bundle.assembler import assemble_bundle
 from shrinkwrap.bundle.formats.directory import finalize_directory_bundle
 from shrinkwrap.bundle.formats.singlefile import finalize_singlefile_bundle
 from shrinkwrap.bundle.formats.squashfs import finalize_squashfs_bundle
+from shrinkwrap.bundle.optimizer import optimize_bundle
+from shrinkwrap.analyze.prune import plan_pruning
 from shrinkwrap.deps.install import install_dependencies
 from shrinkwrap.utils.fs import temp_dir
 
@@ -76,6 +78,28 @@ def build(
         case_sensitive=False,
         help="Bundle output format",
     ),
+    optimize: bool = typer.Option(
+        True,
+        "--optimize/--no-optimize",
+        help="Strip bytecode, tests, and other non-essential files",
+    ),
+    prune_unused: bool = typer.Option(
+        True,
+        "--prune-unused/--no-prune-unused",
+        help="Remove dependencies that are not imported by the application",
+    ),
+    keep_package: list[str] = typer.Option(
+        [],
+        "--keep-package",
+        "-k",
+        help="Package(s) to keep even if unused (can be passed multiple times)",
+    ),
+    drop_package: list[str] = typer.Option(
+        [],
+        "--drop-package",
+        "-d",
+        help="Package(s) to force remove (can be passed multiple times)",
+    ),
 ):
 
     try:
@@ -84,6 +108,8 @@ def build(
         config = BuildConfig(
             entrypoint=entry,
             output_format=bundle_format,
+            optimize=optimize,
+            prune_unused=prune_unused,
         )
 
         typer.echo("Discovering Python runtime")
@@ -93,11 +119,13 @@ def build(
         requirements = discover_requirements(config.project_root)
 
         with temp_dir() as deps_dir:
-            typer.echo("Installing dependencies")
+            typer.echo("Preparing dependencies")
             site_packages = install_dependencies(
                 python_executable=runtime.python_executable,
                 requirements=requirements,
                 output_dir=deps_dir / "site-packages",
+                python_version=runtime.major_minor,
+                platform=runtime.platform,
             )
 
             typer.echo("Assembling bundle")
@@ -110,6 +138,68 @@ def build(
                 if bundle_format == "directory"
                 else deps_dir / "bundle",
             )
+
+            unused_packages: set[str] = set()
+
+            if config.prune_unused:
+                typer.echo("Analyzing imports for pruning")
+                try:
+                    prune_plan = plan_pruning(
+                        config=config,
+                        layout=layout,
+                        allow_packages=set(keep_package),
+                        deny_packages=set(drop_package),
+                    )
+                except ShrinkwrapError as exc:
+                    typer.secho(
+                        f"Skipping pruning due to error: {exc}",
+                        fg=typer.colors.YELLOW,
+                        err=True,
+                    )
+                else:
+                    if prune_plan.unmapped_modules:
+                        typer.secho(
+                            "Skipping pruning; could not map modules: "
+                            + ", ".join(sorted(prune_plan.unmapped_modules)),
+                            fg=typer.colors.YELLOW,
+                        )
+                    else:
+                        unused_packages = set(prune_plan.unused_packages)
+                        if unused_packages:
+                            typer.echo(
+                                " - removing unused packages: "
+                                + ", ".join(sorted(unused_packages))
+                            )
+                        else:
+                            typer.echo(" - no unused packages detected")
+
+            should_optimize = config.optimize or bool(unused_packages)
+
+            if should_optimize:
+                typer.echo("Optimizing bundle")
+                optimize_kwargs = {}
+                if not config.optimize:
+                    optimize_kwargs = dict(
+                        strip_bytecode=False,
+                        strip_tests=False,
+                        strip_metadata=False,
+                        strip_type_hints=False,
+                        strip_packaging_tools=False,
+                        strip_dist_info=False,
+                        remove_build_artifacts=False,
+                        aggressive_stdlib_trim=False,
+                    )
+
+                stats = optimize_bundle(
+                    layout,
+                    remove_packages=unused_packages or None,
+                    **optimize_kwargs,
+                )
+                typer.echo(
+                    " - removed "
+                    f"{stats.files_removed} files, {stats.directories_removed} directories, "
+                    f"{stats.packages_removed} packages, reclaimed {stats.bytes_reclaimed} bytes"
+                )
 
             if config.output_format == "directory":
                 typer.echo("🚀 Finalizing directory bundle")
@@ -130,8 +220,8 @@ def build(
                 typer.echo("Build complete!")
                 typer.echo(f"Archive created at: {artifact}")
 
-            else:  # squashfs
-                typer.echo("🚀 Finalizing squashfs bundle")
+            else:  
+                typer.echo("Finalizing squashfs bundle")
                 artifact = finalize_squashfs_bundle(
                     layout,
                     output_file=Path(output),

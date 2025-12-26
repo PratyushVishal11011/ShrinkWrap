@@ -8,6 +8,8 @@ Shrinkwrap packages FastAPI (or any ASGI) applications into self-contained, redi
 - Installs application dependencies (plus transitives) into an isolated `site-packages` tree.
 - Copies your project sources while excluding previously built bundles to avoid recursion.
 - Generates an executable launcher that sets `PYTHONHOME`, `PYTHONPATH`, and invokes Uvicorn with your entry point.
+- Prunes unused dependency packages based on your app's import graph (can be disabled with `--no-prune-unused`).
+- Strips common weight (bytecode, tests, docs, type hints, packaging tools) to shrink the bundle size (toggle with `--no-optimize`).
 
 ## Prerequisites
 
@@ -38,6 +40,7 @@ This command:
 2. Reads `requirements.txt` (and `requirements-dev.txt` if present) to install dependencies.
 3. Copies your source tree, runtime, and dependencies into `dist/myapp`.
 4. Writes `dist/myapp/run`, an executable launcher.
+5. Prunes unused dependencies and strips non-essential files by default.
 
 You can choose other output formats:
 
@@ -60,7 +63,7 @@ Start the bundled app:
 | Command | Description |
 | --- | --- |
 | `shrinkwrap analyze --entry app.main:app` | Validates the entry point exports an ASGI app. |
-| `shrinkwrap build --entry app.main:app --output dist/myapp [--format directory|singlefile|squashfs]` | Produces a bundle in the chosen format at the given path. |
+| `shrinkwrap build --entry app.main:app --output dist/myapp [--format directory|singlefile|squashfs] [--no-optimize] [--no-prune-unused] [--keep-package pkg] [--drop-package pkg]` | Produces a bundle in the chosen format at the given path, with optional pruning/optimization controls. |
 
 ### Output formats
 
@@ -69,6 +72,13 @@ Start the bundled app:
 - **squashfs**: SquashFS image (needs `mksquashfs` installed and on PATH).
 
 Append `--verbose` to surface additional diagnostics.
+
+### Pruning and optimization flags
+
+- `--prune-unused/--no-prune-unused` (default on): remove dependency packages that are not imported by your app.
+- `--keep-package PKG`: force-keep a package even if unused (repeatable).
+- `--drop-package PKG`: force-remove a package even if it appears used (repeatable).
+- `--optimize/--no-optimize` (default on): controls stripping bytecode, tests, docs, type hints, packaging tools, etc.
 
 ## Development Workflow
 
