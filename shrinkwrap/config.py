@@ -25,6 +25,10 @@ class BuildConfig(BaseModel):
         default=True,
         description="Remove bytecode, tests, and other non-essential files",
     )
+    prune_unused: bool = Field(
+        default=True,
+        description="Remove dependencies that are not imported by the application",
+    )
     debug: bool = Field(
         default=False,
         description="Enable debug behavior in the build",
