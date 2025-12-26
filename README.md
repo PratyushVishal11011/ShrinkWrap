@@ -39,6 +39,16 @@ This command:
 3. Copies your source tree, runtime, and dependencies into `dist/myapp`.
 4. Writes `dist/myapp/run`, an executable launcher.
 
+You can choose other output formats:
+
+```bash
+# tar.gz archive
+shrinkwrap build --entry app.main:app --format singlefile --output dist/myapp.tar.gz
+
+# SquashFS image (requires mksquashfs on PATH)
+shrinkwrap build --entry app.main:app --format squashfs --output dist/myapp.sqsh
+```
+
 Start the bundled app:
 
 ```bash
@@ -50,7 +60,13 @@ Start the bundled app:
 | Command | Description |
 | --- | --- |
 | `shrinkwrap analyze --entry app.main:app` | Validates the entry point exports an ASGI app. |
-| `shrinkwrap build --entry app.main:app --output dist/myapp` | Produces a runnable bundle at the given path. |
+| `shrinkwrap build --entry app.main:app --output dist/myapp [--format directory|singlefile|squashfs]` | Produces a bundle in the chosen format at the given path. |
+
+### Output formats
+
+- **directory** (default): runnable directory with `run` launcher.
+- **singlefile**: tar.gz (or zip if you pass a `.zip` output name) archive of the directory layout.
+- **squashfs**: SquashFS image (needs `mksquashfs` installed and on PATH).
 
 Append `--verbose` to surface additional diagnostics.
 

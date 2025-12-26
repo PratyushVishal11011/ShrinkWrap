@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 from shrinkwrap.errors import ConfigError
@@ -23,6 +24,11 @@ class BuildConfig(BaseModel):
     debug: bool = Field(
         default=False,
         description="Enable debug behavior in the build",
+    )
+
+    output_format: Literal["directory", "singlefile", "squashfs"] = Field(
+        default="directory",
+        description="Bundle output format",
     )
     @field_validator("entrypoint")
     @classmethod
