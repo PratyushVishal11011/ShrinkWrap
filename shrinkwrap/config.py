@@ -21,6 +21,10 @@ class BuildConfig(BaseModel):
         default="shrinkwrapped-app",
         description="Name of the output executable",
     )
+    optimize: bool = Field(
+        default=True,
+        description="Remove bytecode, tests, and other non-essential files",
+    )
     debug: bool = Field(
         default=False,
         description="Enable debug behavior in the build",

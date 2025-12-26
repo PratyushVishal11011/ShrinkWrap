@@ -16,6 +16,7 @@ from shrinkwrap.bundle.assembler import assemble_bundle
 from shrinkwrap.bundle.formats.directory import finalize_directory_bundle
 from shrinkwrap.bundle.formats.singlefile import finalize_singlefile_bundle
 from shrinkwrap.bundle.formats.squashfs import finalize_squashfs_bundle
+from shrinkwrap.bundle.optimizer import optimize_bundle
 from shrinkwrap.deps.install import install_dependencies
 from shrinkwrap.utils.fs import temp_dir
 
@@ -76,6 +77,11 @@ def build(
         case_sensitive=False,
         help="Bundle output format",
     ),
+    optimize: bool = typer.Option(
+        True,
+        "--optimize/--no-optimize",
+        help="Strip bytecode, tests, and other non-essential files",
+    ),
 ):
 
     try:
@@ -84,6 +90,7 @@ def build(
         config = BuildConfig(
             entrypoint=entry,
             output_format=bundle_format,
+            optimize=optimize,
         )
 
         typer.echo("Discovering Python runtime")
@@ -93,11 +100,13 @@ def build(
         requirements = discover_requirements(config.project_root)
 
         with temp_dir() as deps_dir:
-            typer.echo("Installing dependencies")
+            typer.echo("Preparing dependencies")
             site_packages = install_dependencies(
                 python_executable=runtime.python_executable,
                 requirements=requirements,
                 output_dir=deps_dir / "site-packages",
+                python_version=runtime.major_minor,
+                platform=runtime.platform,
             )
 
             typer.echo("Assembling bundle")
@@ -110,6 +119,15 @@ def build(
                 if bundle_format == "directory"
                 else deps_dir / "bundle",
             )
+
+            if config.optimize:
+                typer.echo("Optimizing bundle")
+                stats = optimize_bundle(layout)
+                typer.echo(
+                    " - removed "
+                    f"{stats.files_removed} files, {stats.directories_removed} directories, "
+                    f"{stats.packages_removed} packages, reclaimed {stats.bytes_reclaimed} bytes"
+                )
 
             if config.output_format == "directory":
                 typer.echo("🚀 Finalizing directory bundle")

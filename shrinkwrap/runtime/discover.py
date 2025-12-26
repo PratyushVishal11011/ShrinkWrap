@@ -18,7 +18,6 @@ def discover_python_runtime(
     exe = _resolve_python_executable(python_executable)
 
     info = _query_python_runtime(exe)
-
     major_minor = _extract_major_minor(info["version"])
     if major_minor not in SUPPORTED_MAJOR_MINOR:
         raise PythonRuntimeError(
