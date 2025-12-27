@@ -7,7 +7,8 @@ Shrinkwrap packages FastAPI (or any ASGI) applications into self-contained, redi
 - Discovers the local Python 3.11 runtime and copies the stdlib, shared `libpython`, and optional `pythonXY.zip` archive.
 - Installs application dependencies (plus transitives) into an isolated `site-packages` tree.
 - Copies your project sources while excluding previously built bundles to avoid recursion.
-- Generates an executable launcher that sets `PYTHONHOME`, `PYTHONPATH`, and invokes Uvicorn with your entry point.
+- Precompiles app + dependencies to `.pyc`, optionally packs them into `bundle.pyz`, and drops `.py` sources by default.
+- Generates an executable launcher that sets `PYTHONHOME`, `PYTHONPATH`, and invokes Uvicorn with your entry point while disabling `pip`/`ensurepip`.
 - Prunes unused dependency packages based on your app's import graph (can be disabled with `--no-prune-unused`).
 - Strips common weight (bytecode, tests, docs, type hints, packaging tools) to shrink the bundle size (toggle with `--no-optimize`).
 
@@ -63,7 +64,7 @@ Start the bundled app:
 | Command | Description |
 | --- | --- |
 | `shrinkwrap analyze --entry app.main:app` | Validates the entry point exports an ASGI app. |
-| `shrinkwrap build --entry app.main:app --output dist/myapp [--format directory|singlefile|squashfs] [--no-optimize] [--no-prune-unused] [--keep-package pkg] [--drop-package pkg]` | Produces a bundle in the chosen format at the given path, with optional pruning/optimization controls. |
+| `shrinkwrap build --entry app.main:app --output dist/myapp [--format directory|singlefile|squashfs] [--no-optimize] [--no-prune-unused] [--keep-package pkg] [--drop-package pkg] [--no-zip-imports] [--keep-sources] [--no-freeze-metadata] [--allow-packaging]` | Produces a bundle in the chosen format at the given path, with optional pruning/optimization controls. |
 
 ### Output formats
 
@@ -79,6 +80,10 @@ Append `--verbose` to surface additional diagnostics.
 - `--keep-package PKG`: force-keep a package even if unused (repeatable).
 - `--drop-package PKG`: force-remove a package even if it appears used (repeatable).
 - `--optimize/--no-optimize` (default on): controls stripping bytecode, tests, docs, type hints, packaging tools, etc.
+- `--zip-imports/--no-zip-imports` (default on): build `bundle.pyz` and prepend it to `PYTHONPATH`.
+- `--strip-sources/--keep-sources` (default strip): remove `.py` after emitting `.pyc`.
+- `--freeze-metadata/--no-freeze-metadata` (default on): write a frozen `importlib.metadata` snapshot to skip filesystem scanning.
+- `--block-packaging/--allow-packaging` (default block): install a runtime shim that raises on `pip`/`ensurepip` imports and sets `PYTHONZIPIMPORT_USE_ZIPFILE`/`PYTHONDONTWRITEBYTECODE`.
 
 ## Development Workflow
 
