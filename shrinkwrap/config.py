@@ -29,6 +29,22 @@ class BuildConfig(BaseModel):
         default=True,
         description="Remove dependencies that are not imported by the application",
     )
+    zip_imports: bool = Field(
+        default=True,
+        description="Package application and dependencies into bundle.pyz and prefer zipimport",
+    )
+    strip_sources: bool = Field(
+        default=True,
+        description="Remove .py sources after byte-compiling to .pyc",
+    )
+    freeze_metadata: bool = Field(
+        default=True,
+        description="Freeze importlib.metadata data to avoid filesystem scans",
+    )
+    block_packaging: bool = Field(
+        default=True,
+        description="Disable pip/ensurepip inside the bundled runtime",
+    )
     debug: bool = Field(
         default=False,
         description="Enable debug behavior in the build",

@@ -13,6 +13,7 @@ from shrinkwrap.analyze.requirements import discover_requirements
 from shrinkwrap.runtime.discover import discover_python_runtime
 from shrinkwrap.runtime.env import build_runtime_env
 from shrinkwrap.bundle.assembler import assemble_bundle
+from shrinkwrap.bundle.bytecode import finalize_bytecode_bundle
 from shrinkwrap.bundle.formats.directory import finalize_directory_bundle
 from shrinkwrap.bundle.formats.singlefile import finalize_singlefile_bundle
 from shrinkwrap.bundle.formats.squashfs import finalize_squashfs_bundle
@@ -100,6 +101,26 @@ def build(
         "-d",
         help="Package(s) to force remove (can be passed multiple times)",
     ),
+    zip_imports: bool = typer.Option(
+        True,
+        "--zip-imports/--no-zip-imports",
+        help="Package app + deps into bundle.pyz and prefer zipimport",
+    ),
+    strip_sources: bool = typer.Option(
+        True,
+        "--strip-sources/--keep-sources",
+        help="Drop .py after byte-compiling to .pyc",
+    ),
+    freeze_metadata: bool = typer.Option(
+        True,
+        "--freeze-metadata/--no-freeze-metadata",
+        help="Freeze importlib.metadata to avoid filesystem scans",
+    ),
+    block_packaging: bool = typer.Option(
+        True,
+        "--block-packaging/--allow-packaging",
+        help="Disable pip/ensurepip inside the bundled runtime",
+    ),
 ):
 
     try:
@@ -110,6 +131,10 @@ def build(
             output_format=bundle_format,
             optimize=optimize,
             prune_unused=prune_unused,
+            zip_imports=zip_imports,
+            strip_sources=strip_sources,
+            freeze_metadata=freeze_metadata,
+            block_packaging=block_packaging,
         )
 
         typer.echo("Discovering Python runtime")
@@ -190,6 +215,9 @@ def build(
                         aggressive_stdlib_trim=False,
                     )
 
+                optimize_kwargs.setdefault("strip_bytecode", False)
+                optimize_kwargs.setdefault("strip_dist_info", False)
+
                 stats = optimize_bundle(
                     layout,
                     remove_packages=unused_packages or None,
@@ -200,6 +228,17 @@ def build(
                     f"{stats.files_removed} files, {stats.directories_removed} directories, "
                     f"{stats.packages_removed} packages, reclaimed {stats.bytes_reclaimed} bytes"
                 )
+
+            typer.echo("Freezing bytecode and metadata")
+            pyz = finalize_bytecode_bundle(
+                layout,
+                build_pyz=config.zip_imports,
+                freeze_metadata=config.freeze_metadata,
+                strip_sources=config.strip_sources,
+                block_packaging=config.block_packaging,
+            )
+            if pyz:
+                typer.echo(f" - bundle.pyz created at: {pyz}")
 
             if config.output_format == "directory":
                 typer.echo("🚀 Finalizing directory bundle")
