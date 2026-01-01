@@ -8,7 +8,10 @@ import textwrap
 from email.parser import Parser
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
+from itertools import repeat
+
+_POOL_THRESHOLD = 8
 
 from shrinkwrap.bundle.formats.directory import _validate_layout
 from shrinkwrap.bundle.layout import BundleLayout
@@ -28,8 +31,17 @@ def finalize_bytecode_bundle(
 
     _validate_layout(layout)
 
-    _precompile_tree(layout.app_dir, optimize_level)
-    _precompile_tree(layout.site_packages_dir, optimize_level)
+    app_sources = _list_sources(layout.app_dir)
+    site_sources = _list_sources(layout.site_packages_dir)
+    total_sources = len(app_sources) + len(site_sources)
+    executor = ProcessPoolExecutor(max_workers=_worker_count()) if total_sources > _POOL_THRESHOLD else None
+
+    try:
+        _precompile_tree(layout.app_dir, optimize_level, executor=executor, sources=app_sources)
+        _precompile_tree(layout.site_packages_dir, optimize_level, executor=executor, sources=site_sources)
+    finally:
+        if executor:
+            executor.shutdown()
 
     _remove_pycache(layout.app_dir)
     _remove_pycache(layout.site_packages_dir)
@@ -55,32 +67,42 @@ def finalize_bytecode_bundle(
     return _write_pyz(layout)
 
 
-def _precompile_tree(root: Path, optimize_level: int) -> None:
-    if not root.exists():
-        return
-
-    sources = list(root.rglob("*.py"))
+def _precompile_tree(root: Path, optimize_level: int, *, executor: ProcessPoolExecutor | None = None, sources: list[Path] | None = None) -> None:
+    if sources is None:
+        sources = _list_sources(root)
     if not sources:
         return
 
-    # Fan out compilation to multiple processes to speed up large trees.
-    workers = min(32, (os.cpu_count() or 1))
-    tasks = {(src, root, optimize_level): src for src in sources}
+    if executor is None and len(sources) <= _POOL_THRESHOLD:
+        for source in sources:
+            _compile_source(source, root, optimize_level)
+        return
 
-    with ProcessPoolExecutor(max_workers=workers) as executor:
-        future_map = {executor.submit(_compile_source, task): task_src for task, task_src in tasks.items()}
-        for future in as_completed(future_map):
-            source = future_map[future]
-            try:
-                future.result()
-            except py_compile.PyCompileError as exc:
-                raise BuildError(f"Failed to compile {source}: {exc.msg}") from exc
-            except Exception as exc:
-                raise BuildError(f"Failed to compile {source}: {exc}") from exc
+    if executor is None:
+        with ProcessPoolExecutor(max_workers=_worker_count()) as pool:
+            _drain_compile(pool, sources, root, optimize_level)
+    else:
+        _drain_compile(executor, sources, root, optimize_level)
 
 
-def _compile_source(task: tuple[Path, Path, int]) -> None:
-    source, root, optimize_level = task
+def _drain_compile(executor: ProcessPoolExecutor, sources: list[Path], root: Path, optimize_level: int) -> None:
+    iterator = executor.map(
+        _compile_source,
+        sources,
+        repeat(root),
+        repeat(optimize_level),
+        chunksize=_chunksize(len(sources)),
+    )
+    for source in sources:
+        try:
+            next(iterator)
+        except py_compile.PyCompileError as exc:
+            raise BuildError(f"Failed to compile {source}: {exc.msg}") from exc
+        except Exception as exc:
+            raise BuildError(f"Failed to compile {source}: {exc}") from exc
+
+
+def _compile_source(source: Path, root: Path, optimize_level: int) -> None:
     target = source.with_suffix(".pyc")
     rel = source.relative_to(root)
     py_compile.compile(
@@ -89,6 +111,20 @@ def _compile_source(task: tuple[Path, Path, int]) -> None:
         optimize=optimize_level,
         dfile=str(rel),
     )
+
+
+def _list_sources(root: Path) -> list[Path]:
+    if not root.exists():
+        return []
+    return list(root.rglob("*.py"))
+
+
+def _worker_count() -> int:
+    return min(32, (os.cpu_count() or 1))
+
+
+def _chunksize(count: int) -> int:
+    return 1 if count < 32 else 8
 
 
 def _remove_pycache(root: Path) -> None:

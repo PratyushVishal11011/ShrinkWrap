@@ -4,7 +4,7 @@ Shrinkwrap packages FastAPI (or any ASGI) applications into self-contained, redi
 
 ## Features
 
-- Discovers the local Python 3.11 runtime and copies the stdlib, shared `libpython`, and optional `pythonXY.zip` archive.
+- Discovers the local Python 3.10-3.12 runtime and copies the stdlib, shared `libpython`, and optional `pythonXY.zip` archive.
 - Installs application dependencies (plus transitives) into an isolated `site-packages` tree.
 - Copies your project sources while excluding previously built bundles to avoid recursion.
 - Precompiles app + dependencies to `.pyc`, optionally packs them into `bundle.pyz`, and drops `.py` sources by default.
@@ -15,7 +15,7 @@ Shrinkwrap packages FastAPI (or any ASGI) applications into self-contained, redi
 ## Prerequisites
 
 - macOS or Linux host
-- Python 3.11 available on `PATH` as `python3`
+- Python 3.10-3.12 available on `PATH` as `python3`
 - `pip` for dependency installation
 
 ## Getting Started
