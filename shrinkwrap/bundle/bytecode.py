@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import py_compile
 import configparser
 import textwrap
 from email.parser import Parser
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from shrinkwrap.bundle.formats.directory import _validate_layout
 from shrinkwrap.bundle.layout import BundleLayout
@@ -23,14 +25,12 @@ def finalize_bytecode_bundle(
     block_packaging: bool = True,
     optimize_level: int = 2,
 ) -> Path | None:
-    """Precompile sources to bytecode, optionally write a bundle.pyz, and add runtime shims."""
 
     _validate_layout(layout)
 
     _precompile_tree(layout.app_dir, optimize_level)
     _precompile_tree(layout.site_packages_dir, optimize_level)
 
-    # Remove stale __pycache__ trees since we write legacy .pyc alongside modules.
     _remove_pycache(layout.app_dir)
     _remove_pycache(layout.site_packages_dir)
 
@@ -59,18 +59,36 @@ def _precompile_tree(root: Path, optimize_level: int) -> None:
     if not root.exists():
         return
 
-    for source in root.rglob("*.py"):
-        target = source.with_suffix(".pyc")
-        try:
-            rel = source.relative_to(root)
-            py_compile.compile(
-                str(source),
-                cfile=str(target),
-                optimize=optimize_level,
-                dfile=str(rel),
-            )
-        except py_compile.PyCompileError as exc:
-            raise BuildError(f"Failed to compile {source}: {exc.msg}") from exc
+    sources = list(root.rglob("*.py"))
+    if not sources:
+        return
+
+    # Fan out compilation to multiple processes to speed up large trees.
+    workers = min(32, (os.cpu_count() or 1))
+    tasks = {(src, root, optimize_level): src for src in sources}
+
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        future_map = {executor.submit(_compile_source, task): task_src for task, task_src in tasks.items()}
+        for future in as_completed(future_map):
+            source = future_map[future]
+            try:
+                future.result()
+            except py_compile.PyCompileError as exc:
+                raise BuildError(f"Failed to compile {source}: {exc.msg}") from exc
+            except Exception as exc:
+                raise BuildError(f"Failed to compile {source}: {exc}") from exc
+
+
+def _compile_source(task: tuple[Path, Path, int]) -> None:
+    source, root, optimize_level = task
+    target = source.with_suffix(".pyc")
+    rel = source.relative_to(root)
+    py_compile.compile(
+        str(source),
+        cfile=str(target),
+        optimize=optimize_level,
+        dfile=str(rel),
+    )
 
 
 def _remove_pycache(root: Path) -> None:
