@@ -8,8 +8,7 @@ from typing import Optional
 from shrinkwrap.runtime.python import PythonRuntime
 from shrinkwrap.errors import PythonRuntimeError
 
-SUPPORTED_MAJOR_MINOR = {"3.11"}
-
+SUPPORTED_VERSIONS = {"3.10", "3.11", "3.12"}
 
 def discover_python_runtime(
     *,
@@ -19,10 +18,10 @@ def discover_python_runtime(
 
     info = _query_python_runtime(exe)
     major_minor = _extract_major_minor(info["version"])
-    if major_minor not in SUPPORTED_MAJOR_MINOR:
+    if major_minor not in SUPPORTED_VERSIONS:
         raise PythonRuntimeError(
             f"Unsupported Python version {info['version']} "
-            f"(supported: {', '.join(sorted(SUPPORTED_MAJOR_MINOR))})"
+            f"(supported: {', '.join(sorted(SUPPORTED_VERSIONS))})"
         )
 
     return PythonRuntime(

@@ -8,7 +8,7 @@ name = "shrinkwrap"
 version = "0.1.0"
 description = "Bundle FastAPI applications into minimal runnable executables"
 readme = "README.md"
-requires-python = "=3.11"
+requires-python = ">=3.10,<3.13"
 license = { text = "MIT" }
 
 authors = [
