@@ -10,6 +10,7 @@ from shrinkwrap.bundle.formats.directory import (
     _make_executable,
     _validate_layout,
     _write_posix_launcher,
+    _write_windows_launcher,
 )
 from shrinkwrap.bundle.layout import BundleLayout
 from shrinkwrap.errors import BuildError
@@ -25,18 +26,18 @@ def finalize_executable_bundle(
 
     _validate_layout(layout)
 
-    if layout.is_windows:
-        raise BuildError(
-            "Executable format currently supports only POSIX targets; use directory or singlefile on Windows."
-        )
-
     output_path = Path(output_file)
     ensure_dir(output_path.parent)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        _ensure_posix_launcher(layout, entrypoint)
-        archive_path = _make_archive(layout, output_path, Path(tmp_dir))
-        launcher_script = _build_launcher_script()
+        if layout.is_windows:
+            _ensure_windows_launcher(layout, entrypoint)
+            archive_path = _make_archive(layout, output_path, Path(tmp_dir), format="zip")
+            launcher_script = _build_windows_launcher_script()
+        else:
+            _ensure_posix_launcher(layout, entrypoint)
+            archive_path = _make_archive(layout, output_path, Path(tmp_dir), format="gztar")
+            launcher_script = _build_posix_launcher_script()
 
         try:
             with open(output_path, "wb") as f:
@@ -45,7 +46,8 @@ def finalize_executable_bundle(
                     shutil.copyfileobj(tar, f)
 
             st = output_path.stat()
-            output_path.chmod(st.st_mode | stat.S_IEXEC)
+            if not layout.is_windows:
+                output_path.chmod(st.st_mode | stat.S_IEXEC)
 
         except OSError as exc:
             raise BuildError(
@@ -55,15 +57,15 @@ def finalize_executable_bundle(
     return output_path
 
 
-def _make_archive(layout: BundleLayout, output_path: Path, tmp_dir: Path) -> str:
+def _make_archive(layout: BundleLayout, output_path: Path, tmp_dir: Path, *, format: str) -> str:
     base_name = tmp_dir / "bundle"
 
     try:
         return shutil.make_archive(
             base_name=str(base_name),
-            format="gztar",
+            format=format,
             root_dir=layout.root,
-            base_dir=".",  
+            base_dir=".",
         )
     except (OSError, shutil.Error) as exc:
         raise BuildError(
@@ -85,7 +87,20 @@ def _ensure_posix_launcher(layout: BundleLayout, entrypoint: str) -> None:
     _make_executable(launcher_path)
 
 
-def _build_launcher_script() -> str:
+def _ensure_windows_launcher(layout: BundleLayout, entrypoint: str) -> None:
+    launcher_path = layout.root / "run.bat"
+
+    if launcher_path.exists():
+        return
+
+    _write_windows_launcher(
+        launcher_path=launcher_path,
+        layout=layout,
+        entrypoint=entrypoint,
+    )
+
+
+def _build_posix_launcher_script() -> str:
     return (
         textwrap.dedent(
             """
@@ -112,4 +127,32 @@ def _build_launcher_script() -> str:
             """
         ).strip()
         + "\n"
+    )
+
+
+def _build_windows_launcher_script() -> str:
+    return (
+        textwrap.dedent(
+            r'''
+            @echo off
+            setlocal enabledelayedexpansion
+
+            set "TMPDIR=%TEMP%\shrinkwrap_%RANDOM%%RANDOM%"
+            mkdir "%TMPDIR%" || exit /b 1
+
+            for /f "delims=" %%i in ('findstr /n "^__ARCHIVE_BELOW__$" "%~f0"') do set /a LINE=%%i+1
+            more +%LINE% "%~f0" > "%TMPDIR%\payload.zip"
+
+            powershell -NoProfile -Command "Add-Type -A 'System.IO.Compression.FileSystem'; [System.IO.Compression.ZipFile]::ExtractToDirectory('%TMPDIR%\payload.zip','%TMPDIR%')"
+
+            call "%TMPDIR%\run.bat" %*
+            set EXITCODE=%ERRORLEVEL%
+
+            rd /s /q "%TMPDIR%"
+            exit /b %EXITCODE%
+
+            __ARCHIVE_BELOW__
+            '''
+        ).strip()
+        + "\r\n"
     )
