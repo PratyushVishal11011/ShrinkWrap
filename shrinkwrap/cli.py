@@ -17,6 +17,7 @@ from shrinkwrap.bundle.bytecode import finalize_bytecode_bundle
 from shrinkwrap.bundle.formats.directory import finalize_directory_bundle
 from shrinkwrap.bundle.formats.singlefile import finalize_singlefile_bundle
 from shrinkwrap.bundle.formats.squashfs import finalize_squashfs_bundle
+from shrinkwrap.bundle.formats.executable import finalize_executable_bundle
 from shrinkwrap.bundle.optimizer import optimize_bundle
 from shrinkwrap.analyze.prune import plan_pruning
 from shrinkwrap.deps.install import install_dependencies
@@ -72,7 +73,7 @@ def analyze(
 def build(
     entry: str = typer.Option(..., "--entry", "-e"),
     output: str = typer.Option("dist/app", "--output", "-o"),
-    bundle_format: Literal["directory", "singlefile", "squashfs"] = typer.Option(
+    bundle_format: Literal["directory", "singlefile", "squashfs", "executable"] = typer.Option(
         "directory",
         "--format",
         "-f",
@@ -258,6 +259,16 @@ def build(
                 )
                 typer.echo("Build complete!")
                 typer.echo(f"Archive created at: {artifact}")
+
+            elif config.output_format == "executable":
+                typer.echo("🚀 Finalizing executable bundle")
+                artifact = finalize_executable_bundle(
+                    layout,
+                    entrypoint=config.entrypoint,
+                    output_file=Path(output),
+                )
+                typer.echo("Build complete!")
+                typer.echo(f"Executable created at: {artifact}")
 
             else:  
                 typer.echo("Finalizing squashfs bundle")

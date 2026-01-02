@@ -50,7 +50,7 @@ class BuildConfig(BaseModel):
         description="Enable debug behavior in the build",
     )
 
-    output_format: Literal["directory", "singlefile", "squashfs"] = Field(
+    output_format: Literal["directory", "singlefile", "squashfs", "executable"] = Field(
         default="directory",
         description="Bundle output format",
     )
